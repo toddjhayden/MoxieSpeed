@@ -1,37 +1,72 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Volume2, VolumeX, Play, RotateCcw, Trophy, Zap, Car, Truck, Shield, Heart, Rocket, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Volume2, VolumeX, Play, RotateCcw, Trophy, Fuel, Gauge, Zap } from 'lucide-react';
 import SoundManager from '../utils/SoundManager';
 
 const VEHICLES = [
-  { name: 'Model T', levels: [1, 10], color: '#8B4513', speed: 1 },
-  { name: 'Classic Car', levels: [11, 20], color: '#4169E1', speed: 1.2 },
-  { name: 'Muscle Car', levels: [21, 30], color: '#DC143C', speed: 1.4 },
-  { name: 'Sports Car', levels: [31, 40], color: '#FFD700', speed: 1.6 },
-  { name: 'Race Car', levels: [41, 50], color: '#FF4500', speed: 1.8 },
-  { name: 'Supercar', levels: [51, 60], color: '#9400D3', speed: 2.0 },
-  { name: 'Hypercar', levels: [61, 70], color: '#00CED1', speed: 2.2 },
-  { name: 'Jet Car', levels: [71, 80], color: '#FF1493', speed: 2.5 },
-  { name: 'Hover Car', levels: [81, 90], color: '#00FF7F', speed: 2.8 },
-  { name: 'Spaceship', levels: [91, 100], color: '#FF00FF', speed: 3.0 },
+  { name: 'Model T', maxSpeed: 8, acceleration: 0.15, grip: 0.7, color: '#8B4513', unlockLevel: 1 },
+  { name: 'Hot Rod', maxSpeed: 10, acceleration: 0.18, grip: 0.75, color: '#DC143C', unlockLevel: 5 },
+  { name: 'Muscle Car', maxSpeed: 12, acceleration: 0.2, grip: 0.8, color: '#4169E1', unlockLevel: 10 },
+  { name: 'Sports Car', maxSpeed: 14, acceleration: 0.22, grip: 0.85, color: '#FFD700', unlockLevel: 20 },
+  { name: 'Super Car', maxSpeed: 16, acceleration: 0.25, grip: 0.88, color: '#9400D3', unlockLevel: 35 },
+  { name: 'Hyper Car', maxSpeed: 18, acceleration: 0.28, grip: 0.9, color: '#00CED1', unlockLevel: 50 },
+  { name: 'Rocket Car', maxSpeed: 20, acceleration: 0.3, grip: 0.92, color: '#FF1493', unlockLevel: 70 },
+  { name: 'Hover Racer', maxSpeed: 22, acceleration: 0.32, grip: 0.95, color: '#00FF7F', unlockLevel: 85 },
+  { name: 'Spacecraft', maxSpeed: 25, acceleration: 0.35, grip: 0.98, color: '#FF00FF', unlockLevel: 95 },
 ];
 
-const getVehicle = (level) => {
-  return VEHICLES.find(v => level >= v.levels[0] && level <= v.levels[1]) || VEHICLES[0];
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 500;
+const GROUND_Y = 380;
+const CAR_WIDTH = 80;
+const CAR_HEIGHT = 35;
+
+const generateTerrain = (level) => {
+  const points = [];
+  const segmentWidth = 50;
+  const numSegments = 300;
+  let x = 0;
+  let y = GROUND_Y;
+
+  const hillFrequency = 0.02 + (level * 0.003);
+  const hillAmplitude = 30 + (level * 2);
+  const bumpFrequency = 0.1;
+  const bumpAmplitude = 5 + (level * 0.5);
+
+  for (let i = 0; i <= numSegments; i++) {
+    const hills = Math.sin(x * hillFrequency) * hillAmplitude;
+    const bumps = Math.sin(x * bumpFrequency) * bumpAmplitude;
+    y = GROUND_Y - hills - bumps;
+    points.push({ x, y });
+    x += segmentWidth;
+  }
+
+  return points;
 };
 
-const LANE_COUNT = 5;
-const GAME_WIDTH = 400;
-const GAME_HEIGHT = 600;
-const LANE_WIDTH = GAME_WIDTH / LANE_COUNT;
+const getTerrainYAtX = (terrain, x) => {
+  if (x < 0) return GROUND_Y;
+  const segmentWidth = 50;
+  const index = Math.floor(x / segmentWidth);
+  if (index >= terrain.length - 1) return terrain[terrain.length - 1].y;
 
-const VehicleIcon = ({ color, size = 40, isRocket = false }) => {
-  if (isRocket) {
-    return <Rocket size={size} style={{ color }} />;
-  }
-  return <Car size={size} style={{ color }} />;
+  const p1 = terrain[index];
+  const p2 = terrain[index + 1];
+  const t = (x - p1.x) / segmentWidth;
+  return p1.y + (p2.y - p1.y) * t;
+};
+
+const getTerrainAngleAtX = (terrain, x) => {
+  const segmentWidth = 50;
+  const index = Math.floor(x / segmentWidth);
+  if (index >= terrain.length - 1) return 0;
+
+  const p1 = terrain[index];
+  const p2 = terrain[index + 1];
+  return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 };
 
 export default function RacingGame() {
+  const canvasRef = useRef(null);
   const [gameState, setGameState] = useState('menu');
   const [level, setLevel] = useState(1);
   const [score, setScore] = useState(0);
@@ -39,37 +74,43 @@ export default function RacingGame() {
     const saved = localStorage.getItem('moxiespeed-highscore');
     return saved ? parseInt(saved, 10) : 0;
   });
-  const [playerLane, setPlayerLane] = useState(2);
-  const [obstacles, setObstacles] = useState([]);
-  const [powerUps, setPowerUps] = useState([]);
-  const [distance, setDistance] = useState(0);
-  const [shield, setShield] = useState(false);
-  const [boost, setBoost] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState(0);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [lives, setLives] = useState(3);
+  const [fuel, setFuel] = useState(100);
+  const [nitro, setNitro] = useState(100);
+  const [distance, setDistance] = useState(0);
+  const [speed, setSpeed] = useState(0);
+  const [crashed, setCrashed] = useState(false);
 
   const soundManagerRef = useRef(null);
-  const gameLoopRef = useRef(null);
-  const lastTimeRef = useRef(0);
+  const gameStateRef = useRef({
+    carX: 200,
+    carY: GROUND_Y - CAR_HEIGHT,
+    velocityX: 0,
+    velocityY: 0,
+    rotation: 0,
+    angularVelocity: 0,
+    onGround: true,
+    terrain: [],
+    cameraX: 0,
+    keys: { up: false, down: false, left: false, right: false, space: false },
+    lastTime: 0,
+    distance: 0,
+    fuel: 100,
+    nitro: 100,
+    crashed: false,
+  });
 
-  const vehicle = getVehicle(level);
-  const levelGoal = 1000 + (level * 200);
-  const obstacleSpeed = 3 + (level * 0.15);
-  const spawnRate = Math.max(0.02, 0.05 - (level * 0.0003));
+  const vehicle = VEHICLES[selectedVehicle];
+  const levelGoal = 2000 + (level * 500);
 
   useEffect(() => {
     soundManagerRef.current = new SoundManager(soundEnabled);
-    return () => {
-      if (soundManagerRef.current) {
-        soundManagerRef.current.stopMenuMusic();
-      }
-    };
+    return () => soundManagerRef.current?.stopMenuMusic();
   }, []);
 
   useEffect(() => {
-    if (soundManagerRef.current) {
-      soundManagerRef.current.toggleSound(soundEnabled);
-    }
+    soundManagerRef.current?.toggleSound(soundEnabled);
   }, [soundEnabled]);
 
   useEffect(() => {
@@ -78,35 +119,33 @@ export default function RacingGame() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (gameState !== 'playing') {
-        if (e.key === ' ' || e.key === 'Enter') {
-          if (gameState === 'menu') startGame();
-          else if (gameState === 'gameOver' || gameState === 'victory') resetGame();
-        }
-        return;
-      }
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') gameStateRef.current.keys.up = true;
+      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') gameStateRef.current.keys.down = true;
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') gameStateRef.current.keys.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') gameStateRef.current.keys.right = true;
+      if (e.key === ' ') gameStateRef.current.keys.space = true;
 
-      switch (e.key) {
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          setPlayerLane(prev => Math.max(0, prev - 1));
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          setPlayerLane(prev => Math.min(LANE_COUNT - 1, prev + 1));
-          break;
-        case ' ':
-          setGameState('paused');
-          break;
-        default:
-          break;
+      if (gameState === 'menu' && (e.key === ' ' || e.key === 'Enter')) startGame();
+      if ((gameState === 'gameOver' || gameState === 'levelComplete') && (e.key === ' ' || e.key === 'Enter')) {
+        if (gameState === 'levelComplete') nextLevel();
+        else resetGame();
       }
     };
 
+    const handleKeyUp = (e) => {
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') gameStateRef.current.keys.up = false;
+      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') gameStateRef.current.keys.down = false;
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') gameStateRef.current.keys.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') gameStateRef.current.keys.right = false;
+      if (e.key === ' ') gameStateRef.current.keys.space = false;
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
   }, [gameState]);
 
   const startGame = useCallback(async () => {
@@ -115,175 +154,394 @@ export default function RacingGame() {
       soundManagerRef.current.stopMenuMusic();
       soundManagerRef.current.startRace();
     }
-    setGameState('playing');
-    setObstacles([]);
-    setPowerUps([]);
+
+    const terrain = generateTerrain(level);
+    gameStateRef.current = {
+      carX: 200,
+      carY: GROUND_Y - CAR_HEIGHT,
+      velocityX: 0,
+      velocityY: 0,
+      rotation: 0,
+      angularVelocity: 0,
+      onGround: true,
+      terrain,
+      cameraX: 0,
+      keys: { up: false, down: false, left: false, right: false, space: false },
+      lastTime: performance.now(),
+      distance: 0,
+      fuel: 100,
+      nitro: 100,
+      crashed: false,
+    };
+
+    setFuel(100);
+    setNitro(100);
     setDistance(0);
-    setShield(false);
-    setBoost(false);
-  }, []);
+    setSpeed(0);
+    setCrashed(false);
+    setGameState('playing');
+  }, [level]);
 
   const resetGame = useCallback(() => {
     setLevel(1);
     setScore(0);
-    setLives(3);
-    setPlayerLane(2);
     setGameState('menu');
-    if (soundManagerRef.current) {
-      soundManagerRef.current.playMenuMusic();
-    }
+    soundManagerRef.current?.playMenuMusic();
   }, []);
 
   const nextLevel = useCallback(() => {
     if (level >= 100) {
       setGameState('victory');
-      if (soundManagerRef.current) soundManagerRef.current.victory();
+      soundManagerRef.current?.victory();
       if (score > highScore) setHighScore(score);
       return;
     }
     setLevel(prev => prev + 1);
-    setDistance(0);
-    setObstacles([]);
-    setPowerUps([]);
-    setShield(false);
-    setBoost(false);
-    if (soundManagerRef.current) soundManagerRef.current.levelUp();
-  }, [level, score, highScore]);
+    soundManagerRef.current?.levelUp();
+    startGame();
+  }, [level, score, highScore, startGame]);
 
-  const handleCollision = useCallback(() => {
-    if (shield) {
-      setShield(false);
-      return;
-    }
-
-    if (soundManagerRef.current) soundManagerRef.current.defeat();
-
-    setLives(prev => {
-      const newLives = prev - 1;
-      if (newLives <= 0) {
-        setGameState('gameOver');
-        if (score > highScore) setHighScore(score);
-      }
-      return newLives;
-    });
-
-    setObstacles([]);
-    setDistance(prev => Math.max(0, prev - 200));
-  }, [shield, score, highScore]);
-
+  // Game loop
   useEffect(() => {
     if (gameState !== 'playing') return;
 
-    const gameLoop = (timestamp) => {
-      const deltaTime = timestamp - lastTimeRef.current;
-      lastTimeRef.current = timestamp;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
 
-      if (deltaTime > 0) {
-        const speedMultiplier = boost ? 2 : 1;
-        const actualSpeed = obstacleSpeed * vehicle.speed * speedMultiplier;
+    let animationId;
 
-        setDistance(prev => {
-          const newDist = prev + actualSpeed * 0.5;
-          if (newDist >= levelGoal) {
-            nextLevel();
-            return 0;
+    const gameLoop = (currentTime) => {
+      const gs = gameStateRef.current;
+      const dt = Math.min((currentTime - gs.lastTime) / 1000, 0.05);
+      gs.lastTime = currentTime;
+
+      if (!gs.crashed) {
+        // Physics
+        const gravity = 0.5;
+        const friction = 0.98;
+        const airResistance = 0.995;
+
+        // Input handling
+        let accelerating = false;
+        let braking = false;
+        let usingNitro = false;
+
+        if (gs.keys.up && gs.fuel > 0) {
+          accelerating = true;
+          gs.fuel -= 0.05;
+        }
+        if (gs.keys.down) {
+          braking = true;
+        }
+        if (gs.keys.space && gs.nitro > 0 && gs.keys.up) {
+          usingNitro = true;
+          gs.nitro -= 0.3;
+        }
+        if (gs.keys.left) {
+          gs.angularVelocity -= 0.003;
+        }
+        if (gs.keys.right) {
+          gs.angularVelocity += 0.003;
+        }
+
+        // Get terrain info
+        const terrainY = getTerrainYAtX(gs.terrain, gs.carX + CAR_WIDTH / 2);
+        const terrainAngle = getTerrainAngleAtX(gs.terrain, gs.carX + CAR_WIDTH / 2);
+        const carBottom = gs.carY + CAR_HEIGHT;
+
+        // Ground collision
+        gs.onGround = carBottom >= terrainY - 5;
+
+        if (gs.onGround) {
+          gs.carY = terrainY - CAR_HEIGHT;
+          gs.velocityY = 0;
+          gs.rotation = terrainAngle * 0.7;
+          gs.angularVelocity *= 0.8;
+
+          // Acceleration on ground
+          if (accelerating) {
+            const accel = vehicle.acceleration * (usingNitro ? 2 : 1);
+            gs.velocityX += Math.cos(terrainAngle) * accel;
+            gs.velocityY += Math.sin(terrainAngle) * accel;
           }
-          return newDist;
-        });
 
-        setScore(prev => prev + Math.floor(actualSpeed * 0.1));
+          // Braking
+          if (braking) {
+            gs.velocityX *= 0.95;
+          }
 
-        if (Math.random() < spawnRate) {
-          const lane = Math.floor(Math.random() * LANE_COUNT);
-          setObstacles(prev => [...prev, {
-            id: Date.now() + Math.random(),
-            lane,
-            y: -60,
-            type: Math.random() > 0.7 ? 'truck' : 'car'
-          }]);
+          // Friction
+          gs.velocityX *= friction;
+
+          // Slope effect
+          gs.velocityX += Math.sin(terrainAngle) * gravity * 0.5;
+
+        } else {
+          // Air physics
+          gs.velocityY += gravity;
+          gs.rotation += gs.angularVelocity;
+          gs.angularVelocity *= 0.99;
+          gs.velocityX *= airResistance;
         }
 
-        if (Math.random() < 0.005) {
-          const lane = Math.floor(Math.random() * LANE_COUNT);
-          const type = Math.random() > 0.5 ? 'shield' : 'boost';
-          setPowerUps(prev => [...prev, {
-            id: Date.now() + Math.random(),
-            lane,
-            y: -40,
-            type
-          }]);
+        // Speed limit
+        const maxSpd = vehicle.maxSpeed * (usingNitro ? 1.5 : 1);
+        gs.velocityX = Math.max(-maxSpd * 0.3, Math.min(maxSpd, gs.velocityX));
+
+        // Update position
+        gs.carX += gs.velocityX;
+        gs.carY += gs.velocityY;
+
+        // Prevent going below terrain
+        const newTerrainY = getTerrainYAtX(gs.terrain, gs.carX + CAR_WIDTH / 2);
+        if (gs.carY + CAR_HEIGHT > newTerrainY) {
+          gs.carY = newTerrainY - CAR_HEIGHT;
         }
 
-        setObstacles(prev => {
-          const updated = prev
-            .map(obs => ({ ...obs, y: obs.y + actualSpeed }))
-            .filter(obs => obs.y < GAME_HEIGHT + 60);
+        // Camera follow
+        gs.cameraX = gs.carX - 200;
 
-          updated.forEach(obs => {
-            if (obs.lane === playerLane && obs.y > GAME_HEIGHT - 120 && obs.y < GAME_HEIGHT - 40) {
-              handleCollision();
-            }
-          });
+        // Track distance
+        if (gs.velocityX > 0) {
+          gs.distance += gs.velocityX;
+        }
 
-          return updated;
-        });
+        // Crash detection (car flipped)
+        if (Math.abs(gs.rotation) > Math.PI / 2) {
+          gs.crashed = true;
+          setCrashed(true);
+          soundManagerRef.current?.defeat();
+        }
 
-        setPowerUps(prev => {
-          const updated = prev
-            .map(pu => ({ ...pu, y: pu.y + actualSpeed }))
-            .filter(pu => pu.y < GAME_HEIGHT);
+        // Fuel pickup regeneration (every 500 units)
+        if (Math.floor(gs.distance / 500) > Math.floor((gs.distance - gs.velocityX) / 500)) {
+          gs.fuel = Math.min(100, gs.fuel + 20);
+        }
 
-          const collected = updated.filter(pu =>
-            pu.lane === playerLane && pu.y > GAME_HEIGHT - 120 && pu.y < GAME_HEIGHT - 40
-          );
+        // Nitro regeneration over time
+        if (!usingNitro && gs.nitro < 100) {
+          gs.nitro += 0.02;
+        }
 
-          collected.forEach(pu => {
-            if (pu.type === 'shield') setShield(true);
-            else if (pu.type === 'boost') {
-              setBoost(true);
-              setTimeout(() => setBoost(false), 3000);
-            }
-          });
+        // Out of fuel
+        if (gs.fuel <= 0 && gs.velocityX < 0.5) {
+          gs.crashed = true;
+          setCrashed(true);
+        }
 
-          return updated.filter(pu => !collected.includes(pu));
-        });
+        // Level complete
+        if (gs.distance >= levelGoal) {
+          setScore(prev => prev + Math.floor(gs.distance) + Math.floor(gs.fuel * 10));
+          setGameState('levelComplete');
+          soundManagerRef.current?.victory();
+        }
 
-        if (soundManagerRef.current && Math.random() < 0.1) {
-          soundManagerRef.current.engineSound(actualSpeed);
+        // Update React state periodically
+        setFuel(Math.max(0, Math.floor(gs.fuel)));
+        setNitro(Math.max(0, Math.floor(gs.nitro)));
+        setDistance(Math.floor(gs.distance));
+        setSpeed(Math.abs(Math.floor(gs.velocityX * 10)));
+      }
+
+      // Rendering
+      ctx.fillStyle = '#1a0a3e';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      // Stars
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 50; i++) {
+        const starX = ((i * 137) % CANVAS_WIDTH + gs.cameraX * 0.1) % CANVAS_WIDTH;
+        const starY = (i * 89) % 200;
+        ctx.fillRect(starX, starY, 2, 2);
+      }
+
+      // Mountains (background)
+      ctx.fillStyle = '#2a1a4e';
+      ctx.beginPath();
+      ctx.moveTo(0, CANVAS_HEIGHT);
+      for (let x = 0; x <= CANVAS_WIDTH; x += 100) {
+        const mountainY = 250 + Math.sin((x + gs.cameraX * 0.3) * 0.01) * 50;
+        ctx.lineTo(x, mountainY);
+      }
+      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fill();
+
+      // Hills (midground)
+      ctx.fillStyle = '#3a2a5e';
+      ctx.beginPath();
+      ctx.moveTo(0, CANVAS_HEIGHT);
+      for (let x = 0; x <= CANVAS_WIDTH; x += 50) {
+        const hillY = 320 + Math.sin((x + gs.cameraX * 0.5) * 0.02) * 30;
+        ctx.lineTo(x, hillY);
+      }
+      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fill();
+
+      // Terrain
+      ctx.fillStyle = '#4a3a2e';
+      ctx.beginPath();
+      ctx.moveTo(0, CANVAS_HEIGHT);
+
+      for (let screenX = 0; screenX <= CANVAS_WIDTH; screenX += 10) {
+        const worldX = screenX + gs.cameraX;
+        const terrainY = getTerrainYAtX(gs.terrain, worldX);
+        ctx.lineTo(screenX, terrainY);
+      }
+      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fill();
+
+      // Grass on top of terrain
+      ctx.strokeStyle = '#2d5a2d';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let screenX = 0; screenX <= CANVAS_WIDTH; screenX += 10) {
+        const worldX = screenX + gs.cameraX;
+        const terrainY = getTerrainYAtX(gs.terrain, worldX);
+        if (screenX === 0) ctx.moveTo(screenX, terrainY);
+        else ctx.lineTo(screenX, terrainY);
+      }
+      ctx.stroke();
+
+      // Distance markers
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '12px monospace';
+      for (let d = 0; d <= levelGoal; d += 500) {
+        const markerX = d - gs.cameraX;
+        if (markerX > 0 && markerX < CANVAS_WIDTH) {
+          const markerY = getTerrainYAtX(gs.terrain, d) - 20;
+          ctx.fillText(`${d}m`, markerX, markerY);
         }
       }
 
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
-    };
+      // Draw car
+      const carScreenX = gs.carX - gs.cameraX;
+      const carScreenY = gs.carY;
 
-    gameLoopRef.current = requestAnimationFrame(gameLoop);
+      ctx.save();
+      ctx.translate(carScreenX + CAR_WIDTH / 2, carScreenY + CAR_HEIGHT / 2);
+      ctx.rotate(gs.rotation);
 
-    return () => {
-      if (gameLoopRef.current) {
-        cancelAnimationFrame(gameLoopRef.current);
+      // Car body
+      ctx.fillStyle = vehicle.color;
+      ctx.fillRect(-CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT * 0.7);
+
+      // Car top
+      ctx.fillStyle = vehicle.color;
+      ctx.fillRect(-CAR_WIDTH / 4, -CAR_HEIGHT / 2 - 15, CAR_WIDTH / 2, 15);
+
+      // Windows
+      ctx.fillStyle = '#87CEEB';
+      ctx.fillRect(-CAR_WIDTH / 4 + 3, -CAR_HEIGHT / 2 - 12, CAR_WIDTH / 2 - 6, 10);
+
+      // Wheels
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(-CAR_WIDTH / 3, CAR_HEIGHT / 3, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(CAR_WIDTH / 3, CAR_HEIGHT / 3, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wheel rims
+      ctx.fillStyle = '#666';
+      ctx.beginPath();
+      ctx.arc(-CAR_WIDTH / 3, CAR_HEIGHT / 3, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(CAR_WIDTH / 3, CAR_HEIGHT / 3, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nitro flame
+      if (gs.keys.space && gs.keys.up && gs.nitro > 0) {
+        ctx.fillStyle = '#ff6600';
+        ctx.beginPath();
+        ctx.moveTo(-CAR_WIDTH / 2, 0);
+        ctx.lineTo(-CAR_WIDTH / 2 - 30, 5);
+        ctx.lineTo(-CAR_WIDTH / 2, 10);
+        ctx.fill();
+        ctx.fillStyle = '#ffff00';
+        ctx.beginPath();
+        ctx.moveTo(-CAR_WIDTH / 2, 2);
+        ctx.lineTo(-CAR_WIDTH / 2 - 20, 5);
+        ctx.lineTo(-CAR_WIDTH / 2, 8);
+        ctx.fill();
       }
-    };
-  }, [gameState, playerLane, obstacleSpeed, vehicle.speed, spawnRate, levelGoal, boost, handleCollision, nextLevel]);
 
+      ctx.restore();
+
+      // Finish line
+      const finishX = levelGoal - gs.cameraX;
+      if (finishX > 0 && finishX < CANVAS_WIDTH) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(finishX, 0, 10, CANVAS_HEIGHT);
+        ctx.fillStyle = '#000000';
+        for (let y = 0; y < CANVAS_HEIGHT; y += 20) {
+          ctx.fillRect(finishX, y, 10, 10);
+        }
+      }
+
+      // Crashed overlay
+      if (gs.crashed) {
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('CRASHED!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+        ctx.font = '24px Arial';
+        ctx.fillText('Press SPACE to retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
+
+        if (gs.keys.space) {
+          startGame();
+        }
+      }
+
+      animationId = requestAnimationFrame(gameLoop);
+    };
+
+    animationId = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(animationId);
+  }, [gameState, vehicle, levelGoal, startGame]);
+
+  // Menu screen
   if (gameState === 'menu') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <h1 className="arcade-title text-4xl md:text-6xl neon-glow mb-8 text-center">
+        <h1 className="arcade-title text-4xl md:text-6xl neon-glow mb-4 text-center">
           MOXIE<br/>SPEED
         </h1>
-        <p className="text-lg mb-4 text-green-400">100 Levels of Racing Evolution</p>
-        <p className="text-sm mb-8 text-green-600">Model T to Spaceship</p>
+        <p className="text-lg mb-2 text-green-400">100 Levels of Racing Evolution</p>
+        <p className="text-sm mb-6 text-green-600">Model T to Spacecraft</p>
+
+        <div className="mb-6 text-center">
+          <p className="text-yellow-400 mb-2">Select Vehicle:</p>
+          <div className="flex gap-2 flex-wrap justify-center max-w-lg">
+            {VEHICLES.filter(v => v.unlockLevel <= Math.max(1, level)).map((v, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedVehicle(i)}
+                className={`px-3 py-2 rounded ${selectedVehicle === i ? 'bg-green-600 text-black' : 'bg-gray-700 text-white'}`}
+                style={{ borderColor: v.color, borderWidth: 2 }}
+              >
+                {v.name}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <button
           onClick={startGame}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-8 py-4 rounded-lg text-xl font-bold transition-all transform hover:scale-105"
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-8 py-4 rounded-lg text-xl font-bold transition-all transform hover:scale-105 mb-6"
         >
           <Play size={24} /> START RACE
         </button>
 
-        <div className="mt-8 text-center text-green-500">
-          <p>Arrow keys or A/D to steer</p>
-          <p>SPACE to pause</p>
+        <div className="text-center text-green-500 text-sm">
+          <p className="mb-1">UP / W - Accelerate</p>
+          <p className="mb-1">DOWN / S - Brake</p>
+          <p className="mb-1">LEFT / RIGHT - Balance in air</p>
+          <p className="mb-1">SPACE - Nitro boost</p>
         </div>
 
         {highScore > 0 && (
@@ -295,7 +553,7 @@ export default function RacingGame() {
 
         <button
           onClick={() => setSoundEnabled(!soundEnabled)}
-          className="mt-6 p-2 text-green-400 hover:text-green-300"
+          className="mt-4 p-2 text-green-400 hover:text-green-300"
         >
           {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
         </button>
@@ -303,13 +561,33 @@ export default function RacingGame() {
     );
   }
 
+  // Level complete screen
+  if (gameState === 'levelComplete') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <h2 className="arcade-title text-4xl text-green-400 neon-glow mb-4">LEVEL {level} COMPLETE!</h2>
+        <p className="text-xl mb-2">Distance: {distance}m</p>
+        <p className="text-xl mb-2">Fuel Bonus: {fuel * 10}</p>
+        <p className="text-2xl mb-4 text-yellow-400">Score: {score.toLocaleString()}</p>
+        <button
+          onClick={nextLevel}
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold"
+        >
+          <Play size={20} /> NEXT LEVEL
+        </button>
+      </div>
+    );
+  }
+
+  // Game over screen
   if (gameState === 'gameOver') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
         <h2 className="arcade-title text-4xl text-red-500 mb-4">GAME OVER</h2>
         <p className="text-xl mb-2">Level: {level}</p>
+        <p className="text-xl mb-2">Distance: {distance}m</p>
         <p className="text-2xl mb-4 text-yellow-400">Score: {score.toLocaleString()}</p>
-        {score >= highScore && <p className="text-green-400 mb-4">NEW HIGH SCORE!</p>}
+        {score >= highScore && score > 0 && <p className="text-green-400 mb-4">NEW HIGH SCORE!</p>}
         <button
           onClick={resetGame}
           className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold"
@@ -320,6 +598,7 @@ export default function RacingGame() {
     );
   }
 
+  // Victory screen
   if (gameState === 'victory') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
@@ -338,146 +617,97 @@ export default function RacingGame() {
     );
   }
 
-  if (gameState === 'paused') {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <h2 className="arcade-title text-3xl mb-8">PAUSED</h2>
-        <button
-          onClick={() => setGameState('playing')}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold"
-        >
-          <Play size={20} /> RESUME
-        </button>
-      </div>
-    );
-  }
-
+  // Game screen
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md flex justify-between items-center mb-2 px-2">
-        <div className="text-sm">
-          <span className="text-green-400">LVL {level}</span>
-          <span className="ml-2 text-lg">{vehicle.name}</span>
+    <div className="min-h-screen flex flex-col items-center justify-center p-2 bg-gray-900">
+      {/* HUD */}
+      <div className="w-full max-w-4xl flex justify-between items-center mb-2 px-2 text-white">
+        <div className="flex items-center gap-4">
+          <span className="text-green-400 font-bold">LVL {level}</span>
+          <span style={{ color: vehicle.color }}>{vehicle.name}</span>
         </div>
-        <div className="text-sm text-yellow-400">
-          Score: {score.toLocaleString()}
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1">
+            <Gauge size={16} className="text-blue-400" />
+            {speed} mph
+          </span>
+          <span className="text-yellow-400">Score: {score + Math.floor(distance)}</span>
         </div>
       </div>
 
-      <div className="w-full max-w-md h-2 bg-gray-800 rounded mb-2">
+      {/* Progress bar */}
+      <div className="w-full max-w-4xl h-3 bg-gray-800 rounded mb-2">
         <div
           className="h-full bg-green-500 rounded transition-all"
-          style={{ width: `${(distance / levelGoal) * 100}%` }}
+          style={{ width: `${Math.min(100, (distance / levelGoal) * 100)}%` }}
         />
       </div>
 
-      <div className="w-full max-w-md flex justify-between items-center mb-2 px-2">
-        <div className="flex gap-1">
-          {[...Array(3)].map((_, i) => (
-            <Heart
-              key={i}
-              size={20}
-              className={i < lives ? 'text-red-500 fill-red-500' : 'text-gray-600'}
-            />
-          ))}
+      {/* Fuel and Nitro */}
+      <div className="w-full max-w-4xl flex justify-between items-center mb-2 px-2">
+        <div className="flex items-center gap-2">
+          <Fuel size={16} className="text-orange-400" />
+          <div className="w-32 h-4 bg-gray-800 rounded overflow-hidden">
+            <div className="h-full bg-orange-500 transition-all" style={{ width: `${fuel}%` }} />
+          </div>
         </div>
-        <div className="flex gap-2">
-          {shield && <Shield size={20} className="text-blue-400" />}
-          {boost && <Zap size={20} className="text-orange-400" />}
+        <div className="flex items-center gap-2">
+          <Zap size={16} className="text-yellow-400" />
+          <div className="w-32 h-4 bg-gray-800 rounded overflow-hidden">
+            <div className="h-full bg-yellow-500 transition-all" style={{ width: `${nitro}%` }} />
+          </div>
         </div>
         <button onClick={() => setSoundEnabled(!soundEnabled)} className="text-green-400">
           {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
         </button>
       </div>
 
-      <div
-        className="relative bg-gray-900 border-4 border-green-500 rounded-lg overflow-hidden"
-        style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
-      >
-        {[1, 2, 3, 4].map(i => (
-          <div
-            key={i}
-            className="absolute top-0 bottom-0 w-1 bg-yellow-500 opacity-50"
-            style={{
-              left: i * LANE_WIDTH - 2,
-              backgroundImage: 'repeating-linear-gradient(0deg, #eab308 0px, #eab308 20px, transparent 20px, transparent 40px)',
-              animation: 'scroll 0.5s linear infinite'
-            }}
-          />
-        ))}
+      {/* Game canvas */}
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        className="border-4 border-green-500 rounded-lg"
+      />
 
-        {obstacles.map(obs => (
-          <div
-            key={obs.id}
-            className="absolute flex items-center justify-center"
-            style={{
-              left: obs.lane * LANE_WIDTH + LANE_WIDTH / 2 - 20,
-              top: obs.y,
-              width: 40,
-              height: 60,
-            }}
-          >
-            {obs.type === 'truck' ? (
-              <Truck size={36} className="text-gray-400" />
-            ) : (
-              <Car size={32} className="text-red-400" />
-            )}
-          </div>
-        ))}
-
-        {powerUps.map(pu => (
-          <div
-            key={pu.id}
-            className="absolute flex items-center justify-center animate-pulse"
-            style={{
-              left: pu.lane * LANE_WIDTH + LANE_WIDTH / 2 - 15,
-              top: pu.y,
-              width: 30,
-              height: 30,
-            }}
-          >
-            {pu.type === 'shield' ? (
-              <Shield size={24} className="text-blue-400" />
-            ) : (
-              <Zap size={24} className="text-yellow-400" />
-            )}
-          </div>
-        ))}
-
-        <div
-          className={`absolute transition-all duration-100 flex items-center justify-center ${shield ? 'ring-4 ring-blue-400 rounded-full' : ''} ${boost ? 'animate-pulse' : ''}`}
-          style={{
-            left: playerLane * LANE_WIDTH + LANE_WIDTH / 2 - 25,
-            bottom: 40,
-            width: 50,
-            height: 70,
-          }}
-        >
-          <VehicleIcon color={vehicle.color} size={44} isRocket={level > 80} />
-        </div>
-      </div>
-
-      <div className="flex gap-4 mt-4 md:hidden">
+      {/* Mobile controls */}
+      <div className="flex gap-2 mt-4 md:hidden">
         <button
-          onTouchStart={() => setPlayerLane(prev => Math.max(0, prev - 1))}
-          className="bg-green-600 text-black px-8 py-4 rounded-lg text-2xl font-bold active:bg-green-400"
+          onTouchStart={() => gameStateRef.current.keys.left = true}
+          onTouchEnd={() => gameStateRef.current.keys.left = false}
+          className="bg-gray-700 text-white px-6 py-4 rounded-lg font-bold active:bg-gray-600"
         >
-          <ChevronLeft size={32} />
+          TILT L
         </button>
         <button
-          onTouchStart={() => setPlayerLane(prev => Math.min(LANE_COUNT - 1, prev + 1))}
-          className="bg-green-600 text-black px-8 py-4 rounded-lg text-2xl font-bold active:bg-green-400"
+          onTouchStart={() => gameStateRef.current.keys.down = true}
+          onTouchEnd={() => gameStateRef.current.keys.down = false}
+          className="bg-red-700 text-white px-6 py-4 rounded-lg font-bold active:bg-red-600"
         >
-          <ChevronRight size={32} />
+          BRAKE
+        </button>
+        <button
+          onTouchStart={() => gameStateRef.current.keys.up = true}
+          onTouchEnd={() => gameStateRef.current.keys.up = false}
+          className="bg-green-700 text-white px-6 py-4 rounded-lg font-bold active:bg-green-600"
+        >
+          GAS
+        </button>
+        <button
+          onTouchStart={() => gameStateRef.current.keys.space = true}
+          onTouchEnd={() => gameStateRef.current.keys.space = false}
+          className="bg-yellow-600 text-black px-6 py-4 rounded-lg font-bold active:bg-yellow-500"
+        >
+          NITRO
+        </button>
+        <button
+          onTouchStart={() => gameStateRef.current.keys.right = true}
+          onTouchEnd={() => gameStateRef.current.keys.right = false}
+          className="bg-gray-700 text-white px-6 py-4 rounded-lg font-bold active:bg-gray-600"
+        >
+          TILT R
         </button>
       </div>
-
-      <style>{`
-        @keyframes scroll {
-          0% { background-position: 0 0; }
-          100% { background-position: 0 40px; }
-        }
-      `}</style>
     </div>
   );
 }
