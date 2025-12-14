@@ -1,108 +1,58 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Volume2, VolumeX, Play, RotateCcw, Trophy, Fuel, Gauge, Zap } from 'lucide-react';
+import { Volume2, VolumeX, Play, RotateCcw, Trophy, Flag } from 'lucide-react';
 import SoundManager from '../utils/SoundManager';
 
+const CANVAS_WIDTH = 900;
+const CANVAS_HEIGHT = 600;
+const ROAD_WIDTH = 800;
+const SEGMENT_LENGTH = 200;
+const RUMBLE_LENGTH = 3;
+const LANES = 3;
+
 const VEHICLES = [
-  { name: 'Model T', maxSpeed: 8, acceleration: 0.15, grip: 0.7, color: '#8B4513', unlockLevel: 1 },
-  { name: 'Hot Rod', maxSpeed: 10, acceleration: 0.18, grip: 0.75, color: '#DC143C', unlockLevel: 5 },
-  { name: 'Muscle Car', maxSpeed: 12, acceleration: 0.2, grip: 0.8, color: '#4169E1', unlockLevel: 10 },
-  { name: 'Sports Car', maxSpeed: 14, acceleration: 0.22, grip: 0.85, color: '#FFD700', unlockLevel: 20 },
-  { name: 'Super Car', maxSpeed: 16, acceleration: 0.25, grip: 0.88, color: '#9400D3', unlockLevel: 35 },
-  { name: 'Hyper Car', maxSpeed: 18, acceleration: 0.28, grip: 0.9, color: '#00CED1', unlockLevel: 50 },
-  { name: 'Rocket Car', maxSpeed: 20, acceleration: 0.3, grip: 0.92, color: '#FF1493', unlockLevel: 70 },
-  { name: 'Hover Racer', maxSpeed: 22, acceleration: 0.32, grip: 0.95, color: '#00FF7F', unlockLevel: 85 },
-  { name: 'Spacecraft', maxSpeed: 25, acceleration: 0.35, grip: 0.98, color: '#FF00FF', unlockLevel: 95 },
+  { name: 'Stock Racer', maxSpeed: 200, accel: 5, handling: 1, color: '#e74c3c', unlockLevel: 1 },
+  { name: 'Street Machine', maxSpeed: 220, accel: 5.5, handling: 1.1, color: '#3498db', unlockLevel: 3 },
+  { name: 'Muscle Beast', maxSpeed: 240, accel: 6, handling: 0.9, color: '#f39c12', unlockLevel: 5 },
+  { name: 'Euro Sport', maxSpeed: 260, accel: 5.5, handling: 1.3, color: '#2ecc71', unlockLevel: 10 },
+  { name: 'Super GT', maxSpeed: 280, accel: 6.5, handling: 1.2, color: '#9b59b6', unlockLevel: 20 },
+  { name: 'Hyper Machine', maxSpeed: 300, accel: 7, handling: 1.1, color: '#1abc9c', unlockLevel: 35 },
+  { name: 'Proto Racer', maxSpeed: 320, accel: 7.5, handling: 1.3, color: '#e91e63', unlockLevel: 50 },
+  { name: 'Apex Predator', maxSpeed: 340, accel: 8, handling: 1.4, color: '#ff5722', unlockLevel: 70 },
+  { name: 'Lightning', maxSpeed: 360, accel: 8.5, handling: 1.5, color: '#00bcd4', unlockLevel: 90 },
 ];
 
-const CANVAS_WIDTH = 800;
-const CANVAS_HEIGHT = 500;
-const GROUND_Y = 380;
-const CAR_WIDTH = 80;
-const CAR_HEIGHT = 35;
-
-const generateTerrain = (level) => {
-  const points = [];
-  const segmentWidth = 50;
-  const numSegments = 300;
-  let x = 0;
-  let y = GROUND_Y;
-
-  const hillFrequency = 0.02 + (level * 0.003);
-  const hillAmplitude = 30 + (level * 2);
-  const bumpFrequency = 0.1;
-  const bumpAmplitude = 5 + (level * 0.5);
-
-  for (let i = 0; i <= numSegments; i++) {
-    const hills = Math.sin(x * hillFrequency) * hillAmplitude;
-    const bumps = Math.sin(x * bumpFrequency) * bumpAmplitude;
-    y = GROUND_Y - hills - bumps;
-    points.push({ x, y });
-    x += segmentWidth;
-  }
-
-  return points;
-};
-
-const getTerrainYAtX = (terrain, x) => {
-  if (x < 0) return GROUND_Y;
-  const segmentWidth = 50;
-  const index = Math.floor(x / segmentWidth);
-  if (index >= terrain.length - 1) return terrain[terrain.length - 1].y;
-
-  const p1 = terrain[index];
-  const p2 = terrain[index + 1];
-  const t = (x - p1.x) / segmentWidth;
-  return p1.y + (p2.y - p1.y) * t;
-};
-
-const getTerrainAngleAtX = (terrain, x) => {
-  const segmentWidth = 50;
-  const index = Math.floor(x / segmentWidth);
-  if (index >= terrain.length - 1) return 0;
-
-  const p1 = terrain[index];
-  const p2 = terrain[index + 1];
-  return Math.atan2(p2.y - p1.y, p2.x - p1.x);
+const COLORS = {
+  SKY: '#72D7EE',
+  TREE: '#005108',
+  FOG: '#005108',
+  LIGHT: { road: '#6B6B6B', grass: '#10AA10', rumble: '#555555', lane: '#CCCCCC' },
+  DARK: { road: '#696969', grass: '#009A00', rumble: '#BBBBBB', lane: '#696969' },
+  START: { road: '#FFFFFF', grass: '#10AA10', rumble: '#FFFFFF', lane: '#000000' },
 };
 
 export default function RacingGame() {
   const canvasRef = useRef(null);
   const [gameState, setGameState] = useState('menu');
   const [level, setLevel] = useState(1);
-  const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(() => {
-    const saved = localStorage.getItem('moxiespeed-highscore');
-    return saved ? parseInt(saved, 10) : 0;
-  });
   const [selectedVehicle, setSelectedVehicle] = useState(0);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [fuel, setFuel] = useState(100);
-  const [nitro, setNitro] = useState(100);
-  const [distance, setDistance] = useState(0);
+  const [position, setPosition] = useState(1);
+  const [lap, setLap] = useState(1);
+  const [totalLaps] = useState(3);
   const [speed, setSpeed] = useState(0);
-  const [crashed, setCrashed] = useState(false);
-
-  const soundManagerRef = useRef(null);
-  const gameStateRef = useRef({
-    carX: 200,
-    carY: GROUND_Y - CAR_HEIGHT,
-    velocityX: 0,
-    velocityY: 0,
-    rotation: 0,
-    angularVelocity: 0,
-    onGround: true,
-    terrain: [],
-    cameraX: 0,
-    keys: { up: false, down: false, left: false, right: false, space: false },
-    lastTime: 0,
-    distance: 0,
-    fuel: 100,
-    nitro: 100,
-    crashed: false,
+  const [raceTime, setRaceTime] = useState(0);
+  const [countdown, setCountdown] = useState(0);
+  const [nitro, setNitro] = useState(100);
+  const [finalPosition, setFinalPosition] = useState(null);
+  const [bestTime, setBestTime] = useState(() => {
+    const saved = localStorage.getItem('moxiespeed-besttime');
+    return saved ? parseFloat(saved) : null;
   });
 
+  const soundManagerRef = useRef(null);
+  const gameRef = useRef(null);
+
   const vehicle = VEHICLES[selectedVehicle];
-  const levelGoal = 2000 + (level * 500);
 
   useEffect(() => {
     soundManagerRef.current = new SoundManager(soundEnabled);
@@ -114,599 +64,603 @@ export default function RacingGame() {
   }, [soundEnabled]);
 
   useEffect(() => {
-    localStorage.setItem('moxiespeed-highscore', highScore.toString());
-  }, [highScore]);
+    if (bestTime) localStorage.setItem('moxiespeed-besttime', bestTime.toString());
+  }, [bestTime]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') gameStateRef.current.keys.up = true;
-      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') gameStateRef.current.keys.down = true;
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') gameStateRef.current.keys.left = true;
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') gameStateRef.current.keys.right = true;
-      if (e.key === ' ') gameStateRef.current.keys.space = true;
-
-      if (gameState === 'menu' && (e.key === ' ' || e.key === 'Enter')) startGame();
-      if ((gameState === 'gameOver' || gameState === 'levelComplete') && (e.key === ' ' || e.key === 'Enter')) {
-        if (gameState === 'levelComplete') nextLevel();
-        else resetGame();
-      }
+      if (gameRef.current) gameRef.current.keys[e.key] = true;
+      if (e.key === ' ') e.preventDefault();
     };
-
     const handleKeyUp = (e) => {
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') gameStateRef.current.keys.up = false;
-      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') gameStateRef.current.keys.down = false;
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') gameStateRef.current.keys.left = false;
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') gameStateRef.current.keys.right = false;
-      if (e.key === ' ') gameStateRef.current.keys.space = false;
+      if (gameRef.current) gameRef.current.keys[e.key] = false;
     };
-
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [gameState]);
+  }, []);
+
+  const createTrack = useCallback((level) => {
+    const segments = [];
+    const trackLength = 200 + level * 10;
+
+    const addSegment = (curve, y) => {
+      const n = segments.length;
+      segments.push({
+        index: n,
+        p1: { world: { y: y, z: n * SEGMENT_LENGTH }, camera: {}, screen: {} },
+        p2: { world: { y: y, z: (n + 1) * SEGMENT_LENGTH }, camera: {}, screen: {} },
+        curve: curve,
+        color: Math.floor(n / RUMBLE_LENGTH) % 2 ? COLORS.DARK : COLORS.LIGHT,
+      });
+    };
+
+    const addRoad = (enter, hold, leave, curve, y) => {
+      for (let i = 0; i < enter; i++) addSegment(curve * (i / enter), y);
+      for (let i = 0; i < hold; i++) addSegment(curve, y);
+      for (let i = 0; i < leave; i++) addSegment(curve * (1 - i / leave), y);
+    };
+
+    // Starting straight
+    for (let i = 0; i < 25; i++) addSegment(0, 0);
+
+    // Generate curves based on level
+    const curviness = 2 + level * 0.5;
+    for (let i = 0; i < (trackLength - 50) / 25; i++) {
+      const curve = (Math.sin(i * 0.7) * curviness);
+      addRoad(5, 15, 5, curve, 0);
+    }
+
+    // Finish straight
+    for (let i = 0; i < 25; i++) addSegment(0, 0);
+
+    return segments;
+  }, []);
+
+  const createOpponents = useCallback((trackLength, level) => {
+    const opponents = [];
+    const count = 7;
+    for (let i = 0; i < count; i++) {
+      opponents.push({
+        offset: (Math.random() - 0.5) * 2,
+        z: (i + 1) * trackLength * SEGMENT_LENGTH / (count + 2),
+        speed: 150 + Math.random() * 50 + level * 3,
+        color: `hsl(${(i * 51) % 360}, 70%, 50%)`,
+        lap: 1,
+        finished: false,
+      });
+    }
+    return opponents;
+  }, []);
 
   const startGame = useCallback(async () => {
     if (soundManagerRef.current) {
       await soundManagerRef.current.initialize();
       soundManagerRef.current.stopMenuMusic();
-      soundManagerRef.current.startRace();
     }
 
-    const terrain = generateTerrain(level);
-    gameStateRef.current = {
-      carX: 200,
-      carY: GROUND_Y - CAR_HEIGHT,
-      velocityX: 0,
-      velocityY: 0,
-      rotation: 0,
-      angularVelocity: 0,
-      onGround: true,
-      terrain,
-      cameraX: 0,
-      keys: { up: false, down: false, left: false, right: false, space: false },
-      lastTime: performance.now(),
-      distance: 0,
-      fuel: 100,
+    const segments = createTrack(level);
+    const opponents = createOpponents(segments.length, level);
+
+    gameRef.current = {
+      segments,
+      opponents,
+      trackLength: segments.length * SEGMENT_LENGTH,
+      position: 0,
+      playerX: 0,
+      speed: 0,
+      lap: 1,
+      keys: {},
+      startTime: 0,
       nitro: 100,
-      crashed: false,
+      finished: false,
     };
 
-    setFuel(100);
-    setNitro(100);
-    setDistance(0);
+    setPosition(8);
+    setLap(1);
     setSpeed(0);
-    setCrashed(false);
-    setGameState('playing');
-  }, [level]);
+    setRaceTime(0);
+    setNitro(100);
+    setFinalPosition(null);
+    setCountdown(3);
+    setGameState('countdown');
 
-  const resetGame = useCallback(() => {
-    setLevel(1);
-    setScore(0);
-    setGameState('menu');
-    soundManagerRef.current?.playMenuMusic();
-  }, []);
+    setTimeout(() => setCountdown(2), 1000);
+    setTimeout(() => setCountdown(1), 2000);
+    setTimeout(() => {
+      setCountdown(0);
+      setGameState('playing');
+      if (gameRef.current) gameRef.current.startTime = performance.now();
+      soundManagerRef.current?.startRace();
+    }, 3000);
+  }, [level, createTrack, createOpponents]);
+
+  const finishRace = useCallback((pos) => {
+    if (!gameRef.current) return;
+    const time = (performance.now() - gameRef.current.startTime) / 1000;
+    setRaceTime(time);
+    setFinalPosition(pos);
+
+    if (!bestTime || time < bestTime) setBestTime(time);
+
+    if (pos <= 3) {
+      soundManagerRef.current?.victory();
+      setGameState('victory');
+    } else {
+      soundManagerRef.current?.defeat();
+      setGameState('gameOver');
+    }
+  }, [bestTime]);
 
   const nextLevel = useCallback(() => {
     if (level >= 100) {
-      setGameState('victory');
-      soundManagerRef.current?.victory();
-      if (score > highScore) setHighScore(score);
+      setGameState('champion');
       return;
     }
-    setLevel(prev => prev + 1);
-    soundManagerRef.current?.levelUp();
+    setLevel((prev) => prev + 1);
     startGame();
-  }, [level, score, highScore, startGame]);
+  }, [level, startGame]);
 
-  // Game loop
+  const resetGame = useCallback(() => {
+    setLevel(1);
+    setGameState('menu');
+  }, []);
+
+  // Game Loop
   useEffect(() => {
     if (gameState !== 'playing') return;
-
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-
     let animationId;
 
-    const gameLoop = (currentTime) => {
-      const gs = gameStateRef.current;
-      const dt = Math.min((currentTime - gs.lastTime) / 1000, 0.05);
-      gs.lastTime = currentTime;
+    const render = () => {
+      const g = gameRef.current;
+      if (!g) return;
 
-      if (!gs.crashed) {
-        // Physics
-        const gravity = 0.5;
-        const friction = 0.98;
-        const airResistance = 0.995;
+      const keys = g.keys;
+      const maxSpeed = vehicle.maxSpeed * (g.nitro < 100 && keys[' '] ? 1.5 : 1);
+      const accel = vehicle.accel;
+      const handling = vehicle.handling;
+      const dt = 1 / 60;
 
-        // Input handling
-        let accelerating = false;
-        let braking = false;
-        let usingNitro = false;
-
-        if (gs.keys.up && gs.fuel > 0) {
-          accelerating = true;
-          gs.fuel -= 0.05;
-        }
-        if (gs.keys.down) {
-          braking = true;
-        }
-        if (gs.keys.space && gs.nitro > 0 && gs.keys.up) {
-          usingNitro = true;
-          gs.nitro -= 0.3;
-        }
-        if (gs.keys.left) {
-          gs.angularVelocity -= 0.003;
-        }
-        if (gs.keys.right) {
-          gs.angularVelocity += 0.003;
-        }
-
-        // Get terrain info
-        const terrainY = getTerrainYAtX(gs.terrain, gs.carX + CAR_WIDTH / 2);
-        const terrainAngle = getTerrainAngleAtX(gs.terrain, gs.carX + CAR_WIDTH / 2);
-        const carBottom = gs.carY + CAR_HEIGHT;
-
-        // Ground collision
-        gs.onGround = carBottom >= terrainY - 5;
-
-        if (gs.onGround) {
-          gs.carY = terrainY - CAR_HEIGHT;
-          gs.velocityY = 0;
-          gs.rotation = terrainAngle * 0.7;
-          gs.angularVelocity *= 0.8;
-
-          // Acceleration on ground
-          if (accelerating) {
-            const accel = vehicle.acceleration * (usingNitro ? 2 : 1);
-            gs.velocityX += Math.cos(terrainAngle) * accel;
-            gs.velocityY += Math.sin(terrainAngle) * accel;
-          }
-
-          // Braking
-          if (braking) {
-            gs.velocityX *= 0.95;
-          }
-
-          // Friction
-          gs.velocityX *= friction;
-
-          // Slope effect
-          gs.velocityX += Math.sin(terrainAngle) * gravity * 0.5;
-
+      if (!g.finished) {
+        // Accelerate / Brake
+        if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+          g.speed = Math.min(g.speed + accel, maxSpeed);
+        } else if (keys['ArrowDown'] || keys['s'] || keys['S']) {
+          g.speed = Math.max(g.speed - accel * 2, 0);
         } else {
-          // Air physics
-          gs.velocityY += gravity;
-          gs.rotation += gs.angularVelocity;
-          gs.angularVelocity *= 0.99;
-          gs.velocityX *= airResistance;
+          g.speed = Math.max(g.speed - accel * 0.5, 0);
         }
 
-        // Speed limit
-        const maxSpd = vehicle.maxSpeed * (usingNitro ? 1.5 : 1);
-        gs.velocityX = Math.max(-maxSpd * 0.3, Math.min(maxSpd, gs.velocityX));
-
-        // Update position
-        gs.carX += gs.velocityX;
-        gs.carY += gs.velocityY;
-
-        // Prevent going below terrain
-        const newTerrainY = getTerrainYAtX(gs.terrain, gs.carX + CAR_WIDTH / 2);
-        if (gs.carY + CAR_HEIGHT > newTerrainY) {
-          gs.carY = newTerrainY - CAR_HEIGHT;
+        // Nitro
+        if (keys[' '] && g.nitro > 0 && g.speed > 50) {
+          g.nitro -= 0.5;
+          g.speed = Math.min(g.speed + accel * 0.5, maxSpeed);
+        } else if (g.nitro < 100) {
+          g.nitro += 0.1;
         }
 
-        // Camera follow
-        gs.cameraX = gs.carX - 200;
+        // Steering
+        const dx = dt * 2 * (g.speed / maxSpeed) * handling;
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) g.playerX -= dx;
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) g.playerX += dx;
 
-        // Track distance
-        if (gs.velocityX > 0) {
-          gs.distance += gs.velocityX;
+        // Keep on road
+        if (Math.abs(g.playerX) > 2) {
+          g.playerX = Math.max(-2, Math.min(2, g.playerX));
+          g.speed *= 0.95;
+        } else if (Math.abs(g.playerX) > 1) {
+          g.speed *= 0.98;
         }
 
-        // Crash detection (car flipped)
-        if (Math.abs(gs.rotation) > Math.PI / 2) {
-          gs.crashed = true;
-          setCrashed(true);
-          soundManagerRef.current?.defeat();
+        // Move forward
+        g.position += g.speed * dt;
+
+        // Apply curve
+        const segIdx = Math.floor(g.position / SEGMENT_LENGTH) % g.segments.length;
+        const seg = g.segments[segIdx];
+        if (seg) {
+          g.playerX += seg.curve * g.speed * 0.0001;
         }
 
-        // Fuel pickup regeneration (every 500 units)
-        if (Math.floor(gs.distance / 500) > Math.floor((gs.distance - gs.velocityX) / 500)) {
-          gs.fuel = Math.min(100, gs.fuel + 20);
+        // Lap
+        if (g.position >= g.trackLength) {
+          g.position -= g.trackLength;
+          g.lap++;
+          setLap(g.lap);
+          soundManagerRef.current?.levelUp();
+          if (g.lap > totalLaps) {
+            g.finished = true;
+            let pos = 1;
+            g.opponents.forEach((o) => { if (o.finished) pos++; });
+            finishRace(pos);
+          }
         }
 
-        // Nitro regeneration over time
-        if (!usingNitro && gs.nitro < 100) {
-          gs.nitro += 0.02;
-        }
+        // Opponents
+        g.opponents.forEach((opp) => {
+          if (opp.finished) return;
+          opp.z += opp.speed * dt;
+          opp.offset += (Math.sin(opp.z * 0.002) * 0.5 - opp.offset) * 0.1;
+          if (opp.z >= g.trackLength) {
+            opp.z -= g.trackLength;
+            opp.lap++;
+            if (opp.lap > totalLaps) opp.finished = true;
+          }
+          // Collision
+          const dz = Math.abs(opp.z - g.position);
+          const dx = Math.abs(opp.offset - g.playerX);
+          if (dz < SEGMENT_LENGTH && dx < 0.7) {
+            if (g.position > opp.z) g.speed *= 0.7;
+            else opp.speed *= 0.7;
+            g.playerX += (g.playerX - opp.offset) * 0.3;
+          }
+        });
 
-        // Out of fuel
-        if (gs.fuel <= 0 && gs.velocityX < 0.5) {
-          gs.crashed = true;
-          setCrashed(true);
-        }
-
-        // Level complete
-        if (gs.distance >= levelGoal) {
-          setScore(prev => prev + Math.floor(gs.distance) + Math.floor(gs.fuel * 10));
-          setGameState('levelComplete');
-          soundManagerRef.current?.victory();
-        }
-
-        // Update React state periodically
-        setFuel(Math.max(0, Math.floor(gs.fuel)));
-        setNitro(Math.max(0, Math.floor(gs.nitro)));
-        setDistance(Math.floor(gs.distance));
-        setSpeed(Math.abs(Math.floor(gs.velocityX * 10)));
+        // Position calc
+        let pos = 1;
+        g.opponents.forEach((opp) => {
+          const oppProg = opp.lap * g.trackLength + opp.z;
+          const playerProg = g.lap * g.trackLength + g.position;
+          if (oppProg > playerProg) pos++;
+        });
+        setPosition(pos);
+        setSpeed(Math.floor(g.speed));
+        setNitro(Math.floor(Math.max(0, g.nitro)));
+        setRaceTime((performance.now() - g.startTime) / 1000);
       }
 
-      // Rendering
+      // RENDER
+      const width = CANVAS_WIDTH;
+      const height = CANVAS_HEIGHT;
+      const roadWidth = ROAD_WIDTH;
+      const segmentLength = SEGMENT_LENGTH;
+      const cameraHeight = 1000;
+      const cameraDepth = 1 / Math.tan(80 * Math.PI / 360);
+      const drawDistance = 100;
+
+      // Sky
       ctx.fillStyle = '#1a0a3e';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fillRect(0, 0, width, height);
 
-      // Stars
-      ctx.fillStyle = '#ffffff';
-      for (let i = 0; i < 50; i++) {
-        const starX = ((i * 137) % CANVAS_WIDTH + gs.cameraX * 0.1) % CANVAS_WIDTH;
-        const starY = (i * 89) % 200;
-        ctx.fillRect(starX, starY, 2, 2);
-      }
+      // Horizon
+      const horizonY = height / 2;
 
-      // Mountains (background)
-      ctx.fillStyle = '#2a1a4e';
-      ctx.beginPath();
-      ctx.moveTo(0, CANVAS_HEIGHT);
-      for (let x = 0; x <= CANVAS_WIDTH; x += 100) {
-        const mountainY = 250 + Math.sin((x + gs.cameraX * 0.3) * 0.01) * 50;
-        ctx.lineTo(x, mountainY);
-      }
-      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
-      ctx.fill();
+      // Render segments back to front
+      const baseSegment = Math.floor(g.position / segmentLength);
+      const basePercent = (g.position % segmentLength) / segmentLength;
 
-      // Hills (midground)
-      ctx.fillStyle = '#3a2a5e';
-      ctx.beginPath();
-      ctx.moveTo(0, CANVAS_HEIGHT);
-      for (let x = 0; x <= CANVAS_WIDTH; x += 50) {
-        const hillY = 320 + Math.sin((x + gs.cameraX * 0.5) * 0.02) * 30;
-        ctx.lineTo(x, hillY);
-      }
-      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
-      ctx.fill();
+      let maxy = height;
+      let x = 0;
+      let dx = -(g.segments[baseSegment % g.segments.length]?.curve || 0) * basePercent;
 
-      // Terrain
-      ctx.fillStyle = '#4a3a2e';
-      ctx.beginPath();
-      ctx.moveTo(0, CANVAS_HEIGHT);
+      for (let n = 0; n < drawDistance; n++) {
+        const segIdx = (baseSegment + n) % g.segments.length;
+        const seg = g.segments[segIdx];
+        if (!seg) continue;
 
-      for (let screenX = 0; screenX <= CANVAS_WIDTH; screenX += 10) {
-        const worldX = screenX + gs.cameraX;
-        const terrainY = getTerrainYAtX(gs.terrain, worldX);
-        ctx.lineTo(screenX, terrainY);
-      }
-      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
-      ctx.fill();
+        const camZ = g.position - (n === 0 ? 0 : 0);
+        const projZ = (n * segmentLength) + (segmentLength - (g.position % segmentLength));
 
-      // Grass on top of terrain
-      ctx.strokeStyle = '#2d5a2d';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      for (let screenX = 0; screenX <= CANVAS_WIDTH; screenX += 10) {
-        const worldX = screenX + gs.cameraX;
-        const terrainY = getTerrainYAtX(gs.terrain, worldX);
-        if (screenX === 0) ctx.moveTo(screenX, terrainY);
-        else ctx.lineTo(screenX, terrainY);
-      }
-      ctx.stroke();
+        if (projZ <= 0) continue;
 
-      // Distance markers
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '12px monospace';
-      for (let d = 0; d <= levelGoal; d += 500) {
-        const markerX = d - gs.cameraX;
-        if (markerX > 0 && markerX < CANVAS_WIDTH) {
-          const markerY = getTerrainYAtX(gs.terrain, d) - 20;
-          ctx.fillText(`${d}m`, markerX, markerY);
+        const scale = cameraDepth / projZ;
+        const projY = horizonY - scale * cameraHeight * height;
+        const projW = scale * roadWidth * width / 2;
+        const projX = width / 2 + (x - g.playerX * projW);
+
+        seg.p1.screen = { x: projX, y: projY, w: projW };
+
+        x += dx;
+        dx += seg.curve;
+
+        if (n > 0 && projY < maxy) {
+          const prevSeg = g.segments[(baseSegment + n - 1) % g.segments.length];
+          const p1 = prevSeg.p1.screen;
+          const p2 = seg.p1.screen;
+
+          // Grass
+          ctx.fillStyle = seg.color.grass;
+          ctx.fillRect(0, p2.y, width, p1.y - p2.y);
+
+          // Rumble
+          const rumbleW1 = p1.w * 1.15;
+          const rumbleW2 = p2.w * 1.15;
+          ctx.fillStyle = seg.color.rumble;
+          ctx.beginPath();
+          ctx.moveTo(p1.x - rumbleW1, p1.y);
+          ctx.lineTo(p1.x + rumbleW1, p1.y);
+          ctx.lineTo(p2.x + rumbleW2, p2.y);
+          ctx.lineTo(p2.x - rumbleW2, p2.y);
+          ctx.fill();
+
+          // Road
+          ctx.fillStyle = seg.color.road;
+          ctx.beginPath();
+          ctx.moveTo(p1.x - p1.w, p1.y);
+          ctx.lineTo(p1.x + p1.w, p1.y);
+          ctx.lineTo(p2.x + p2.w, p2.y);
+          ctx.lineTo(p2.x - p2.w, p2.y);
+          ctx.fill();
+
+          // Lane markers
+          if (seg.color === COLORS.LIGHT) {
+            ctx.fillStyle = '#FFFFFF';
+            const laneW = 0.02;
+            for (let l = -0.5; l <= 0.5; l += 0.5) {
+              if (l === 0) continue;
+              ctx.beginPath();
+              ctx.moveTo(p1.x + p1.w * l - p1.w * laneW, p1.y);
+              ctx.lineTo(p1.x + p1.w * l + p1.w * laneW, p1.y);
+              ctx.lineTo(p2.x + p2.w * l + p2.w * laneW, p2.y);
+              ctx.lineTo(p2.x + p2.w * l - p2.w * laneW, p2.y);
+              ctx.fill();
+            }
+          }
+
+          // Start line
+          if (segIdx < 3) {
+            ctx.fillStyle = segIdx % 2 ? '#000' : '#FFF';
+            const lineH = Math.max(1, (p1.y - p2.y) * 0.3);
+            ctx.fillRect(p2.x - p2.w, p2.y, p2.w * 2, lineH);
+          }
+
+          maxy = p2.y;
         }
       }
 
-      // Draw car
-      const carScreenX = gs.carX - gs.cameraX;
-      const carScreenY = gs.carY;
+      // Render opponents
+      g.opponents.forEach((opp) => {
+        let oppZ = opp.z - g.position;
+        if (oppZ < 0) oppZ += g.trackLength;
+        if (oppZ < 0 || oppZ > segmentLength * drawDistance) return;
+
+        const scale = cameraDepth / oppZ;
+        const projY = horizonY - scale * cameraHeight * height;
+        const projW = scale * roadWidth * width / 2;
+        const projX = width / 2 + (opp.offset - g.playerX) * projW;
+
+        if (projY < horizonY || projY > height - 50) return;
+
+        const carW = projW * 0.15;
+        const carH = carW * 0.6;
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(projX - carW / 2, projY - carH * 0.1, carW, carH * 0.15);
+
+        // Body
+        ctx.fillStyle = opp.color;
+        ctx.fillRect(projX - carW / 2, projY - carH, carW, carH * 0.7);
+
+        // Roof
+        ctx.fillRect(projX - carW / 3, projY - carH * 1.3, carW * 0.66, carH * 0.3);
+
+        // Windows
+        ctx.fillStyle = '#333';
+        ctx.fillRect(projX - carW / 4, projY - carH * 1.25, carW * 0.5, carH * 0.2);
+      });
+
+      // Player car at bottom
+      const carY = height - 80;
+      const carW = 90;
+      const carH = 45;
+      const tilt = -g.playerX * 0.05;
 
       ctx.save();
-      ctx.translate(carScreenX + CAR_WIDTH / 2, carScreenY + CAR_HEIGHT / 2);
-      ctx.rotate(gs.rotation);
+      ctx.translate(width / 2, carY);
+      ctx.rotate(tilt);
 
-      // Car body
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(-carW / 2, carH * 0.35, carW, 8);
+
+      // Body
       ctx.fillStyle = vehicle.color;
-      ctx.fillRect(-CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT * 0.7);
+      ctx.beginPath();
+      ctx.moveTo(-carW / 2, carH * 0.3);
+      ctx.lineTo(-carW / 2 + 10, -carH * 0.3);
+      ctx.lineTo(carW / 2 - 10, -carH * 0.3);
+      ctx.lineTo(carW / 2, carH * 0.3);
+      ctx.closePath();
+      ctx.fill();
 
-      // Car top
+      // Roof
       ctx.fillStyle = vehicle.color;
-      ctx.fillRect(-CAR_WIDTH / 4, -CAR_HEIGHT / 2 - 15, CAR_WIDTH / 2, 15);
+      ctx.beginPath();
+      ctx.moveTo(-carW / 3, -carH * 0.3);
+      ctx.lineTo(-carW / 4, -carH * 0.7);
+      ctx.lineTo(carW / 4, -carH * 0.7);
+      ctx.lineTo(carW / 3, -carH * 0.3);
+      ctx.closePath();
+      ctx.fill();
 
-      // Windows
+      // Windshield
       ctx.fillStyle = '#87CEEB';
-      ctx.fillRect(-CAR_WIDTH / 4 + 3, -CAR_HEIGHT / 2 - 12, CAR_WIDTH / 2 - 6, 10);
+      ctx.beginPath();
+      ctx.moveTo(-carW / 4 + 5, -carH * 0.35);
+      ctx.lineTo(-carW / 5, -carH * 0.65);
+      ctx.lineTo(carW / 5, -carH * 0.65);
+      ctx.lineTo(carW / 4 - 5, -carH * 0.35);
+      ctx.closePath();
+      ctx.fill();
 
       // Wheels
-      ctx.fillStyle = '#1a1a1a';
+      ctx.fillStyle = '#111';
       ctx.beginPath();
-      ctx.arc(-CAR_WIDTH / 3, CAR_HEIGHT / 3, 12, 0, Math.PI * 2);
+      ctx.arc(-carW / 2.5, carH * 0.2, 10, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(CAR_WIDTH / 3, CAR_HEIGHT / 3, 12, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Wheel rims
-      ctx.fillStyle = '#666';
-      ctx.beginPath();
-      ctx.arc(-CAR_WIDTH / 3, CAR_HEIGHT / 3, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(CAR_WIDTH / 3, CAR_HEIGHT / 3, 6, 0, Math.PI * 2);
+      ctx.arc(carW / 2.5, carH * 0.2, 10, 0, Math.PI * 2);
       ctx.fill();
 
-      // Nitro flame
-      if (gs.keys.space && gs.keys.up && gs.nitro > 0) {
-        ctx.fillStyle = '#ff6600';
+      // Rims
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.arc(-carW / 2.5, carH * 0.2, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(carW / 2.5, carH * 0.2, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nitro flames
+      if (keys[' '] && g.nitro > 0 && g.speed > 50) {
+        ctx.fillStyle = '#FF6600';
         ctx.beginPath();
-        ctx.moveTo(-CAR_WIDTH / 2, 0);
-        ctx.lineTo(-CAR_WIDTH / 2 - 30, 5);
-        ctx.lineTo(-CAR_WIDTH / 2, 10);
+        ctx.moveTo(-carW / 4, carH * 0.3);
+        ctx.lineTo(-carW / 4 - 8, carH * 0.3 + 25 + Math.random() * 15);
+        ctx.lineTo(-carW / 4 + 8, carH * 0.3);
         ctx.fill();
-        ctx.fillStyle = '#ffff00';
         ctx.beginPath();
-        ctx.moveTo(-CAR_WIDTH / 2, 2);
-        ctx.lineTo(-CAR_WIDTH / 2 - 20, 5);
-        ctx.lineTo(-CAR_WIDTH / 2, 8);
+        ctx.moveTo(carW / 4, carH * 0.3);
+        ctx.lineTo(carW / 4 - 8, carH * 0.3 + 25 + Math.random() * 15);
+        ctx.lineTo(carW / 4 + 8, carH * 0.3);
         ctx.fill();
       }
 
       ctx.restore();
 
-      // Finish line
-      const finishX = levelGoal - gs.cameraX;
-      if (finishX > 0 && finishX < CANVAS_WIDTH) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(finishX, 0, 10, CANVAS_HEIGHT);
-        ctx.fillStyle = '#000000';
-        for (let y = 0; y < CANVAS_HEIGHT; y += 20) {
-          ctx.fillRect(finishX, y, 10, 10);
-        }
-      }
-
-      // Crashed overlay
-      if (gs.crashed) {
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('CRASHED!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-        ctx.font = '24px Arial';
-        ctx.fillText('Press SPACE to retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
-
-        if (gs.keys.space) {
-          startGame();
-        }
-      }
-
-      animationId = requestAnimationFrame(gameLoop);
+      animationId = requestAnimationFrame(render);
     };
 
-    animationId = requestAnimationFrame(gameLoop);
+    animationId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animationId);
-  }, [gameState, vehicle, levelGoal, startGame]);
+  }, [gameState, vehicle, totalLaps, finishRace]);
 
-  // Menu screen
   if (gameState === 'menu') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <h1 className="arcade-title text-4xl md:text-6xl neon-glow mb-4 text-center">
-          MOXIE<br/>SPEED
-        </h1>
-        <p className="text-lg mb-2 text-green-400">100 Levels of Racing Evolution</p>
-        <p className="text-sm mb-6 text-green-600">Model T to Spacecraft</p>
+        <h1 className="arcade-title text-4xl md:text-6xl neon-glow mb-4 text-center">MOXIE SPEED</h1>
+        <p className="text-lg mb-6 text-green-400">Outrun the Competition - 100 Levels</p>
 
         <div className="mb-6 text-center">
-          <p className="text-yellow-400 mb-2">Select Vehicle:</p>
-          <div className="flex gap-2 flex-wrap justify-center max-w-lg">
-            {VEHICLES.filter(v => v.unlockLevel <= Math.max(1, level)).map((v, i) => (
+          <p className="text-yellow-400 mb-2">Select Your Ride:</p>
+          <div className="flex gap-2 flex-wrap justify-center max-w-2xl">
+            {VEHICLES.filter((v) => v.unlockLevel <= level).map((v, i) => (
               <button
                 key={i}
                 onClick={() => setSelectedVehicle(i)}
-                className={`px-3 py-2 rounded ${selectedVehicle === i ? 'bg-green-600 text-black' : 'bg-gray-700 text-white'}`}
+                className={`px-3 py-2 rounded text-sm ${selectedVehicle === i ? 'bg-green-600 text-black' : 'bg-gray-700'}`}
                 style={{ borderColor: v.color, borderWidth: 2 }}
               >
-                {v.name}
+                <div style={{ color: selectedVehicle === i ? '#000' : v.color }}>{v.name}</div>
+                <div className="text-xs text-gray-400">{v.maxSpeed} mph</div>
               </button>
             ))}
           </div>
         </div>
 
-        <button
-          onClick={startGame}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-8 py-4 rounded-lg text-xl font-bold transition-all transform hover:scale-105 mb-6"
-        >
-          <Play size={24} /> START RACE
+        <button onClick={startGame} className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-8 py-4 rounded-lg text-xl font-bold mb-6">
+          <Play size={24} /> RACE LEVEL {level}
         </button>
 
-        <div className="text-center text-green-500 text-sm">
-          <p className="mb-1">UP / W - Accelerate</p>
-          <p className="mb-1">DOWN / S - Brake</p>
-          <p className="mb-1">LEFT / RIGHT - Balance in air</p>
-          <p className="mb-1">SPACE - Nitro boost</p>
+        <div className="text-center text-green-500 text-sm mb-4">
+          <p>UP / W - Accelerate | DOWN / S - Brake</p>
+          <p>LEFT / RIGHT or A / D - Steer</p>
+          <p>SPACE - Nitro Boost</p>
         </div>
 
-        {highScore > 0 && (
-          <p className="mt-4 text-yellow-400">
-            <Trophy className="inline mr-2" size={16} />
-            High Score: {highScore.toLocaleString()}
-          </p>
-        )}
-
-        <button
-          onClick={() => setSoundEnabled(!soundEnabled)}
-          className="mt-4 p-2 text-green-400 hover:text-green-300"
-        >
-          {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
-        </button>
+        <div className="flex items-center gap-4">
+          {bestTime && (
+            <p className="text-yellow-400">
+              <Trophy className="inline mr-1" size={16} /> Best: {bestTime.toFixed(2)}s
+            </p>
+          )}
+          <button onClick={() => setSoundEnabled(!soundEnabled)} className="text-green-400">
+            {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
+          </button>
+        </div>
       </div>
     );
   }
 
-  // Level complete screen
-  if (gameState === 'levelComplete') {
+  if (gameState === 'countdown') {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <h2 className="arcade-title text-4xl text-green-400 neon-glow mb-4">LEVEL {level} COMPLETE!</h2>
-        <p className="text-xl mb-2">Distance: {distance}m</p>
-        <p className="text-xl mb-2">Fuel Bonus: {fuel * 10}</p>
-        <p className="text-2xl mb-4 text-yellow-400">Score: {score.toLocaleString()}</p>
-        <button
-          onClick={nextLevel}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold"
-        >
-          <Play size={20} /> NEXT LEVEL
-        </button>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900">
+        <h1 className="arcade-title text-8xl text-yellow-400 neon-glow animate-pulse">{countdown}</h1>
+        <p className="text-2xl mt-4 text-green-400">GET READY!</p>
       </div>
     );
   }
 
-  // Game over screen
-  if (gameState === 'gameOver') {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <h2 className="arcade-title text-4xl text-red-500 mb-4">GAME OVER</h2>
-        <p className="text-xl mb-2">Level: {level}</p>
-        <p className="text-xl mb-2">Distance: {distance}m</p>
-        <p className="text-2xl mb-4 text-yellow-400">Score: {score.toLocaleString()}</p>
-        {score >= highScore && score > 0 && <p className="text-green-400 mb-4">NEW HIGH SCORE!</p>}
-        <button
-          onClick={resetGame}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold"
-        >
-          <RotateCcw size={20} /> TRY AGAIN
-        </button>
-      </div>
-    );
-  }
-
-  // Victory screen
   if (gameState === 'victory') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
         <h2 className="arcade-title text-4xl text-yellow-400 neon-glow mb-4">
-          <Trophy className="inline" /> CHAMPION! <Trophy className="inline" />
+          <Trophy className="inline" /> {finalPosition === 1 ? 'WINNER!' : `${finalPosition}${finalPosition === 2 ? 'ND' : 'RD'} PLACE!`}
         </h2>
-        <p className="text-xl mb-4">You completed all 100 levels!</p>
-        <p className="text-2xl mb-4 text-yellow-400">Final Score: {score.toLocaleString()}</p>
-        <button
-          onClick={resetGame}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold"
-        >
+        <p className="text-xl mb-2">Level {level} Complete!</p>
+        <p className="text-xl mb-4">Time: {raceTime.toFixed(2)}s</p>
+        <button onClick={nextLevel} className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold">
+          <Flag size={20} /> NEXT RACE
+        </button>
+      </div>
+    );
+  }
+
+  if (gameState === 'gameOver') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <h2 className="arcade-title text-4xl text-red-500 mb-4">{finalPosition}TH PLACE</h2>
+        <p className="text-xl mb-2">Top 3 needed to advance!</p>
+        <p className="text-xl mb-4">Time: {raceTime.toFixed(2)}s</p>
+        <div className="flex gap-4">
+          <button onClick={startGame} className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-500 text-black px-6 py-3 rounded-lg font-bold">
+            <RotateCcw size={20} /> RETRY
+          </button>
+          <button onClick={resetGame} className="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-lg font-bold">MENU</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameState === 'champion') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <h2 className="arcade-title text-4xl text-yellow-400 neon-glow mb-4">
+          <Trophy className="inline" /> WORLD CHAMPION! <Trophy className="inline" />
+        </h2>
+        <p className="text-xl mb-4">You conquered all 100 levels!</p>
+        <button onClick={resetGame} className="flex items-center gap-2 bg-green-600 text-black px-6 py-3 rounded-lg font-bold">
           <RotateCcw size={20} /> PLAY AGAIN
         </button>
       </div>
     );
   }
 
-  // Game screen
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-2 bg-gray-900">
-      {/* HUD */}
-      <div className="w-full max-w-4xl flex justify-between items-center mb-2 px-2 text-white">
+    <div className="min-h-screen flex flex-col items-center justify-center p-2 bg-black">
+      <div className="w-full max-w-4xl flex justify-between items-center mb-1 px-2 text-white text-sm">
         <div className="flex items-center gap-4">
-          <span className="text-green-400 font-bold">LVL {level}</span>
-          <span style={{ color: vehicle.color }}>{vehicle.name}</span>
+          <span className="text-2xl font-bold" style={{ color: position <= 3 ? '#22c55e' : '#ef4444' }}>P{position}</span>
+          <span className="text-yellow-400">LAP {lap}/{totalLaps}</span>
         </div>
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1">
-            <Gauge size={16} className="text-blue-400" />
-            {speed} mph
-          </span>
-          <span className="text-yellow-400">Score: {score + Math.floor(distance)}</span>
+          <span className="text-blue-400 font-mono text-xl">{speed} MPH</span>
+          <span className="text-green-400">{raceTime.toFixed(1)}s</span>
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div className="w-full max-w-4xl h-3 bg-gray-800 rounded mb-2">
-        <div
-          className="h-full bg-green-500 rounded transition-all"
-          style={{ width: `${Math.min(100, (distance / levelGoal) * 100)}%` }}
-        />
+      <div className="w-full max-w-4xl flex items-center gap-2 mb-1 px-2">
+        <span className="text-yellow-400 text-xs">NITRO</span>
+        <div className="flex-1 h-3 bg-gray-800 rounded overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-yellow-500 to-orange-500" style={{ width: `${nitro}%` }} />
+        </div>
       </div>
 
-      {/* Fuel and Nitro */}
-      <div className="w-full max-w-4xl flex justify-between items-center mb-2 px-2">
-        <div className="flex items-center gap-2">
-          <Fuel size={16} className="text-orange-400" />
-          <div className="w-32 h-4 bg-gray-800 rounded overflow-hidden">
-            <div className="h-full bg-orange-500 transition-all" style={{ width: `${fuel}%` }} />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Zap size={16} className="text-yellow-400" />
-          <div className="w-32 h-4 bg-gray-800 rounded overflow-hidden">
-            <div className="h-full bg-yellow-500 transition-all" style={{ width: `${nitro}%` }} />
-          </div>
-        </div>
-        <button onClick={() => setSoundEnabled(!soundEnabled)} className="text-green-400">
-          {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
-        </button>
-      </div>
+      <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="border-2 border-green-500 rounded" />
 
-      {/* Game canvas */}
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        className="border-4 border-green-500 rounded-lg"
-      />
-
-      {/* Mobile controls */}
-      <div className="flex gap-2 mt-4 md:hidden">
-        <button
-          onTouchStart={() => gameStateRef.current.keys.left = true}
-          onTouchEnd={() => gameStateRef.current.keys.left = false}
-          className="bg-gray-700 text-white px-6 py-4 rounded-lg font-bold active:bg-gray-600"
-        >
-          TILT L
-        </button>
-        <button
-          onTouchStart={() => gameStateRef.current.keys.down = true}
-          onTouchEnd={() => gameStateRef.current.keys.down = false}
-          className="bg-red-700 text-white px-6 py-4 rounded-lg font-bold active:bg-red-600"
-        >
-          BRAKE
-        </button>
-        <button
-          onTouchStart={() => gameStateRef.current.keys.up = true}
-          onTouchEnd={() => gameStateRef.current.keys.up = false}
-          className="bg-green-700 text-white px-6 py-4 rounded-lg font-bold active:bg-green-600"
-        >
-          GAS
-        </button>
-        <button
-          onTouchStart={() => gameStateRef.current.keys.space = true}
-          onTouchEnd={() => gameStateRef.current.keys.space = false}
-          className="bg-yellow-600 text-black px-6 py-4 rounded-lg font-bold active:bg-yellow-500"
-        >
-          NITRO
-        </button>
-        <button
-          onTouchStart={() => gameStateRef.current.keys.right = true}
-          onTouchEnd={() => gameStateRef.current.keys.right = false}
-          className="bg-gray-700 text-white px-6 py-4 rounded-lg font-bold active:bg-gray-600"
-        >
-          TILT R
-        </button>
+      <div className="flex gap-2 mt-2 md:hidden">
+        <button onTouchStart={() => { if (gameRef.current) gameRef.current.keys['ArrowLeft'] = true; }} onTouchEnd={() => { if (gameRef.current) gameRef.current.keys['ArrowLeft'] = false; }} className="bg-gray-700 text-white px-6 py-4 rounded-lg">LEFT</button>
+        <button onTouchStart={() => { if (gameRef.current) gameRef.current.keys['ArrowDown'] = true; }} onTouchEnd={() => { if (gameRef.current) gameRef.current.keys['ArrowDown'] = false; }} className="bg-red-700 text-white px-6 py-4 rounded-lg">BRAKE</button>
+        <button onTouchStart={() => { if (gameRef.current) gameRef.current.keys['ArrowUp'] = true; }} onTouchEnd={() => { if (gameRef.current) gameRef.current.keys['ArrowUp'] = false; }} className="bg-green-700 text-white px-6 py-4 rounded-lg">GAS</button>
+        <button onTouchStart={() => { if (gameRef.current) gameRef.current.keys[' '] = true; }} onTouchEnd={() => { if (gameRef.current) gameRef.current.keys[' '] = false; }} className="bg-yellow-600 text-black px-4 py-4 rounded-lg">N2O</button>
+        <button onTouchStart={() => { if (gameRef.current) gameRef.current.keys['ArrowRight'] = true; }} onTouchEnd={() => { if (gameRef.current) gameRef.current.keys['ArrowRight'] = false; }} className="bg-gray-700 text-white px-6 py-4 rounded-lg">RIGHT</button>
       </div>
     </div>
   );
