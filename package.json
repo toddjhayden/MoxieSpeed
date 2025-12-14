@@ -1,0 +1,33 @@
+﻿{
+    "scripts":  {
+                    "preview":  "vite preview",
+                    "build":  "vite build",
+                    "dev":  "vite",
+                    "deploy":  "npm run build \u0026\u0026 gh-pages -d dist",
+                    "lint":  "eslint src --ext js,jsx"
+                },
+    "description":  "Progressive 100-level racing game from Model T Fords to Spaceships",
+    "type":  "module",
+    "version":  "1.1.0",
+    "engines":  {
+                    "node":  "\u003e=18.0.0"
+                },
+    "name":  "moxiespeed",
+    "homepage":  "https://toddjhayden.github.io/MoxieSpeed/",
+    "devDependencies":  {
+                            "vite":  "^4.3.9",
+                            "eslint":  "^8.44.0",
+                            "postcss":  "^8.4.24",
+                            "eslint-plugin-react":  "^7.32.2",
+                            "tailwindcss":  "^3.3.0",
+                            "gh-pages":  "^6.1.0",
+                            "autoprefixer":  "^10.4.14",
+                            "@vitejs/plugin-react":  "^4.0.0"
+                        },
+    "dependencies":  {
+                         "lucide-react":  "^0.263.1",
+                         "react":  "^18.2.0",
+                         "react-dom":  "^18.2.0",
+                         "tone":  "^14.8.49"
+                     }
+}

@@ -1,0 +1,32 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Press+Start+2P&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Courier Prime', monospace;
+  background: linear-gradient(135deg, #0a0e27 0%, #1a0a3e 50%, #0a0e27 100%);
+  color: #00ff00;
+  min-height: 100vh;
+}
+
+canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.neon-glow {
+  text-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 30px #00ff00;
+}
+
+.arcade-title {
+  font-family: 'Press Start 2P', cursive;
+  letter-spacing: 2px;
+}
