@@ -4,16 +4,16 @@ import SoundManager from '../utils/SoundManager';
 
 // Vehicle progression through 100 levels
 const VEHICLES = [
-  { name: 'Model T', emoji: '=ó', levels: [1, 10], color: '#8B4513', speed: 1 },
-  { name: 'Classic Car', emoji: '=ô', levels: [11, 20], color: '#4169E1', speed: 1.2 },
-  { name: 'Muscle Car', emoji: '<Œ', levels: [21, 30], color: '#DC143C', speed: 1.4 },
-  { name: 'Sports Car', emoji: '=ò', levels: [31, 40], color: '#FFD700', speed: 1.6 },
-  { name: 'Race Car', emoji: '<¡', levels: [41, 50], color: '#FF4500', speed: 1.8 },
-  { name: 'Supercar', emoji: '°', levels: [51, 60], color: '#9400D3', speed: 2.0 },
-  { name: 'Hypercar', emoji: '=®', levels: [61, 70], color: '#00CED1', speed: 2.2 },
+  { name: 'Model T', emoji: '=ÔøΩ', levels: [1, 10], color: '#8B4513', speed: 1 },
+  { name: 'Classic Car', emoji: '=ÔøΩ', levels: [11, 20], color: '#4169E1', speed: 1.2 },
+  { name: 'Muscle Car', emoji: '<ÔøΩ', levels: [21, 30], color: '#DC143C', speed: 1.4 },
+  { name: 'Sports Car', emoji: '=ÔøΩ', levels: [31, 40], color: '#FFD700', speed: 1.6 },
+  { name: 'Race Car', emoji: '<ÔøΩ', levels: [41, 50], color: '#FF4500', speed: 1.8 },
+  { name: 'Supercar', emoji: 'ÔøΩ', levels: [51, 60], color: '#9400D3', speed: 2.0 },
+  { name: 'Hypercar', emoji: '=ÔøΩ', levels: [61, 70], color: '#00CED1', speed: 2.2 },
   { name: 'Jet Car', emoji: '', levels: [71, 80], color: '#FF1493', speed: 2.5 },
-  { name: 'Hover Car', emoji: '=¯', levels: [81, 90], color: '#00FF7F', speed: 2.8 },
-  { name: 'Spaceship', emoji: '=Ä', levels: [91, 100], color: '#FF00FF', speed: 3.0 },
+  { name: 'Hover Car', emoji: '=ÔøΩ', levels: [81, 90], color: '#00FF7F', speed: 2.8 },
+  { name: 'Spaceship', emoji: '=ÔøΩ', levels: [91, 100], color: '#FF00FF', speed: 3.0 },
 ];
 
 const getVehicle = (level) => {
@@ -281,7 +281,7 @@ export default function RacingGame() {
           MOXIE<br/>SPEED
         </h1>
         <p className="text-lg mb-4 text-green-400">100 Levels of Racing Evolution</p>
-        <p className="text-sm mb-8 text-green-600">Model T í Spaceship</p>
+        <p className="text-sm mb-8 text-green-600">Model T ÔøΩ Spaceship</p>
 
         <button
           onClick={startGame}
@@ -291,7 +291,7 @@ export default function RacingGame() {
         </button>
 
         <div className="mt-8 text-center text-green-500">
-          <p>ê í or A/D to steer</p>
+          <p>ÔøΩ ÔøΩ or A/D to steer</p>
           <p>SPACE to pause</p>
         </div>
 
@@ -334,7 +334,7 @@ export default function RacingGame() {
   if (gameState === 'victory') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
-        <h2 className="arcade-title text-4xl text-yellow-400 neon-glow mb-4"><∆ CHAMPION! <∆</h2>
+        <h2 className="arcade-title text-4xl text-yellow-400 neon-glow mb-4"><Trophy className="inline" /> CHAMPION! <Trophy className="inline" /></h2>
         <p className="text-xl mb-4">You completed all 100 levels!</p>
         <p className="text-2xl mb-4 text-yellow-400">Final Score: {score.toLocaleString()}</p>
         <button
@@ -387,10 +387,10 @@ export default function RacingGame() {
       {/* Lives and power-ups */}
       <div className="w-full max-w-md flex justify-between items-center mb-2 px-2">
         <div className="text-red-500">
-          {'d'.repeat(lives)}{'=§'.repeat(3 - lives)}
+          {'d'.repeat(lives)}{'=ÔøΩ'.repeat(3 - lives)}
         </div>
         <div className="flex gap-2">
-          {shield && <span className="text-blue-400">=·</span>}
+          {shield && <span className="text-blue-400">=ÔøΩ</span>}
           {boost && <span className="text-orange-400">=%</span>}
         </div>
         <button onClick={() => setSoundEnabled(!soundEnabled)} className="text-green-400">
@@ -428,7 +428,7 @@ export default function RacingGame() {
               height: 60,
             }}
           >
-            {obs.type === 'truck' ? '=õ' : '=ó'}
+            {obs.type === 'truck' ? '=ÔøΩ' : '=ÔøΩ'}
           </div>
         ))}
 
@@ -444,7 +444,7 @@ export default function RacingGame() {
               height: 30,
             }}
           >
-            {pu.type === 'shield' ? '=·' : <Zap className="text-yellow-400" />}
+            {pu.type === 'shield' ? '=ÔøΩ' : <Zap className="text-yellow-400" />}
           </div>
         ))}
 
@@ -468,13 +468,13 @@ export default function RacingGame() {
           onTouchStart={() => setPlayerLane(prev => Math.max(0, prev - 1))}
           className="bg-green-600 text-black px-8 py-4 rounded-lg text-2xl font-bold active:bg-green-400"
         >
-          ê
+          ÔøΩ
         </button>
         <button
           onTouchStart={() => setPlayerLane(prev => Math.min(LANE_COUNT - 1, prev + 1))}
           className="bg-green-600 text-black px-8 py-4 rounded-lg text-2xl font-bold active:bg-green-400"
         >
-          í
+          ÔøΩ
         </button>
       </div>
 
